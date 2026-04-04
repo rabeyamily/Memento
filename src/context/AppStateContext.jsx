@@ -1,0 +1,510 @@
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+} from 'react';
+import {
+  DEFAULT_CATEGORY_ID,
+  DEFAULT_SUBCATEGORY_ID,
+  STORAGE_KEYS,
+} from '../utils/constants';
+import { toISODate } from '../utils/dates';
+import { taskOccursOnDate } from '../utils/recurrence';
+import { sanitizePlainText, sanitizeRichHtml } from '../utils/sanitize';
+import { anchorDateForWeekday } from '../utils/tracker';
+
+function loadJSON(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
+function saveJSON(key, value) {
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
+const defaultSettings = {
+  dotColor: '#e5e5e5',
+  bgColor: '#fafafa',
+  textColor: '#111111',
+  textMuted: '#737373',
+  accentDark: '#111111',
+  borderMuted: '#e5e5e5',
+};
+
+function normalizeSettings(raw) {
+  if (!raw || typeof raw !== 'object') return { ...defaultSettings };
+  return {
+    dotColor: raw.dotColor ?? defaultSettings.dotColor,
+    bgColor: raw.bgColor ?? defaultSettings.bgColor,
+    textColor: raw.textColor ?? defaultSettings.textColor,
+    textMuted: raw.textMuted ?? defaultSettings.textMuted,
+    accentDark: raw.accentDark ?? defaultSettings.accentDark,
+    borderMuted: raw.borderMuted ?? defaultSettings.borderMuted,
+  };
+}
+
+const defaultCategories = [{ id: DEFAULT_CATEGORY_ID, name: '' }];
+const defaultSubcategories = [
+  { id: DEFAULT_SUBCATEGORY_ID, name: '', categoryId: DEFAULT_CATEGORY_ID },
+];
+
+/** Fix tasks whose subcategory does not belong to their category (they would not appear under any heading). */
+function repairTaskCategoryRefs(tasks, categories, subcategories) {
+  if (!Array.isArray(tasks) || tasks.length === 0) return tasks;
+  const catIds = new Set(categories.map((c) => c.id));
+  const subsByCat = new Map();
+  for (const s of subcategories) {
+    if (!subsByCat.has(s.categoryId)) subsByCat.set(s.categoryId, []);
+    subsByCat.get(s.categoryId).push(s);
+  }
+  for (const arr of subsByCat.values()) {
+    arr.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  const defaultSubs = subsByCat.get(DEFAULT_CATEGORY_ID) || [];
+  const defaultPair = {
+    categoryId: DEFAULT_CATEGORY_ID,
+    subcategoryId: defaultSubs[0]?.id ?? DEFAULT_SUBCATEGORY_ID,
+  };
+
+  let changed = false;
+  const next = tasks.map((t) => {
+    if (!catIds.has(t.categoryId)) {
+      changed = true;
+      return { ...t, ...defaultPair };
+    }
+    const sub = subcategories.find((s) => s.id === t.subcategoryId);
+    if (sub && sub.categoryId === t.categoryId) return t;
+
+    const candidates = subsByCat.get(t.categoryId) || [];
+    if (candidates.length > 0) {
+      changed = true;
+      return { ...t, subcategoryId: candidates[0].id };
+    }
+    changed = true;
+    return { ...t, ...defaultPair };
+  });
+
+  if (changed) saveJSON(STORAGE_KEYS.tasks, next);
+  return next;
+}
+
+function migrateIfNeeded() {
+  const hasCategoriesKey = localStorage.getItem(STORAGE_KEYS.categories);
+  let categories = loadJSON(STORAGE_KEYS.categories, null);
+  let subcategories = loadJSON(STORAGE_KEYS.subcategories, null);
+  let tasks = loadJSON(STORAGE_KEYS.tasks, []);
+
+  if (!hasCategoriesKey) {
+    const oldSubs = loadJSON('memento_subcategories', []);
+    categories = [...defaultCategories];
+    if (Array.isArray(oldSubs) && oldSubs.length) {
+      subcategories = oldSubs.map((s) => ({
+        id: s.id,
+        name: s.name,
+        categoryId: s.categoryId || DEFAULT_CATEGORY_ID,
+      }));
+      if (!subcategories.some((s) => s.categoryId === DEFAULT_CATEGORY_ID)) {
+        subcategories = [...subcategories, ...defaultSubcategories];
+      }
+    } else {
+      subcategories = [...defaultSubcategories];
+    }
+    saveJSON(STORAGE_KEYS.categories, categories);
+    saveJSON(STORAGE_KEYS.subcategories, subcategories);
+  }
+
+  if (!categories?.length) {
+    categories = [...defaultCategories];
+    saveJSON(STORAGE_KEYS.categories, categories);
+  }
+  if (!subcategories?.length) {
+    subcategories = [...defaultSubcategories];
+    saveJSON(STORAGE_KEYS.subcategories, subcategories);
+  }
+
+  let renamedDefaults = false;
+  categories = categories.map((c) => {
+    if (c.id === DEFAULT_CATEGORY_ID && c.name === 'General') {
+      renamedDefaults = true;
+      return { ...c, name: '' };
+    }
+    return c;
+  });
+  subcategories = subcategories.map((s) => {
+    if (s.id === DEFAULT_SUBCATEGORY_ID && s.name === 'General') {
+      renamedDefaults = true;
+      return { ...s, name: '' };
+    }
+    return s;
+  });
+  if (renamedDefaults) {
+    saveJSON(STORAGE_KEYS.categories, categories);
+    saveJSON(STORAGE_KEYS.subcategories, subcategories);
+  }
+
+  let clearedMainPlaceholder = false;
+  subcategories = subcategories.map((s) => {
+    if (s.name !== 'Main') return s;
+    const siblings = subcategories.filter((x) => x.categoryId === s.categoryId);
+    if (siblings.length === 1) {
+      clearedMainPlaceholder = true;
+      return { ...s, name: '' };
+    }
+    return s;
+  });
+  if (clearedMainPlaceholder) {
+    saveJSON(STORAGE_KEYS.subcategories, subcategories);
+  }
+
+  if (tasks.length && tasks[0].days && !tasks[0].recurrence) {
+    tasks = tasks.map((t) => ({
+      id: t.id,
+      contentHTML: t.contentHTML,
+      categoryId: DEFAULT_CATEGORY_ID,
+      subcategoryId: t.subcategoryId || DEFAULT_SUBCATEGORY_ID,
+      recurrence: {
+        type: 'days_of_week',
+        days: Array.isArray(t.days) ? t.days : ['mon'],
+        startDate: toISODate(new Date()),
+        endDate: null,
+      },
+      time: t.time ?? null,
+      order:
+        typeof t.order === 'object' && !Array.isArray(t.order)
+          ? migrateOrderKeys(t.order)
+          : {},
+    }));
+    saveJSON(STORAGE_KEYS.tasks, tasks);
+  }
+
+  if (tasks.length && tasks.some((t) => t.time === undefined)) {
+    tasks = tasks.map((t) => ({ ...t, time: t.time ?? null }));
+    saveJSON(STORAGE_KEYS.tasks, tasks);
+  }
+
+  tasks = repairTaskCategoryRefs(tasks, categories, subcategories);
+
+  let settings = loadJSON(STORAGE_KEYS.settings, null);
+  settings = normalizeSettings(settings);
+  saveJSON(STORAGE_KEYS.settings, settings);
+
+  return {
+    categories,
+    subcategories,
+    tasks,
+    completions: loadJSON(STORAGE_KEYS.completions, {}),
+    settings,
+  };
+}
+
+/** Old order used weekday keys; drop — new model uses ISO dates only. */
+function migrateOrderKeys(order) {
+  if (!order || typeof order !== 'object') return {};
+  const first = Object.keys(order)[0];
+  if (first && /^\d{4}-\d{2}-\d{2}$/.test(first)) return order;
+  return {};
+}
+
+const AppStateContext = createContext(null);
+
+export function AppStateProvider({ children }) {
+  const initial = useMemo(() => migrateIfNeeded(), []);
+  const [categories, setCategories] = useState(() => initial.categories);
+  const [subcategories, setSubcategories] = useState(() => initial.subcategories);
+  const [tasks, setTasks] = useState(() => initial.tasks);
+  const [completions, setCompletions] = useState(() => initial.completions);
+  const [settings, setSettings] = useState(() => normalizeSettings(initial.settings));
+
+  const persistCategories = useCallback((next) => {
+    setCategories(next);
+    saveJSON(STORAGE_KEYS.categories, next);
+  }, []);
+
+  const persistSubcategories = useCallback((next) => {
+    setSubcategories(next);
+    saveJSON(STORAGE_KEYS.subcategories, next);
+  }, []);
+
+  const persistTasks = useCallback((next) => {
+    setTasks(next);
+    saveJSON(STORAGE_KEYS.tasks, next);
+  }, []);
+
+  const persistCompletions = useCallback((next) => {
+    setCompletions(next);
+    saveJSON(STORAGE_KEYS.completions, next);
+  }, []);
+
+  const persistSettings = useCallback((patch) => {
+    setSettings((prev) => {
+      const merged = normalizeSettings({ ...prev, ...patch });
+      saveJSON(STORAGE_KEYS.settings, merged);
+      return merged;
+    });
+  }, []);
+
+  const newId = (prefix) =>
+    typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  const addCategory = useCallback(
+    (name) => {
+      const trimmed = sanitizePlainText(name).trim();
+      if (!trimmed) return null;
+      const row = { id: newId('cat'), name: trimmed };
+      persistCategories([...categories, row]);
+      return row;
+    },
+    [categories, persistCategories]
+  );
+
+  const renameCategory = useCallback(
+    (id, name) => {
+      const trimmed = sanitizePlainText(name).trim();
+      if (!trimmed) return;
+      persistCategories(
+        categories.map((c) => (c.id === id ? { ...c, name: trimmed } : c))
+      );
+    },
+    [categories, persistCategories]
+  );
+
+  const deleteCategory = useCallback(
+    (id) => {
+      if (id === DEFAULT_CATEGORY_ID) return;
+      const fallback = DEFAULT_CATEGORY_ID;
+      const fallbackSub =
+        subcategories.find((s) => s.categoryId === fallback)?.id ||
+        DEFAULT_SUBCATEGORY_ID;
+      persistCategories(categories.filter((c) => c.id !== id));
+      persistSubcategories(subcategories.filter((s) => s.categoryId !== id));
+      persistTasks(
+        tasks.map((t) =>
+          t.categoryId === id
+            ? {
+                ...t,
+                categoryId: fallback,
+                subcategoryId: fallbackSub,
+              }
+            : t
+        )
+      );
+    },
+    [categories, subcategories, tasks, persistCategories, persistSubcategories, persistTasks]
+  );
+
+  const addSubcategory = useCallback(
+    (categoryId, name) => {
+      const trimmed = sanitizePlainText(name).trim();
+      if (!trimmed) return null;
+      const row = { id: newId('sc'), name: trimmed, categoryId };
+      persistSubcategories([...subcategories, row]);
+      return row;
+    },
+    [subcategories, persistSubcategories]
+  );
+
+  /** Creates an unnamed subcategory when a category has none (no visible "Main" placeholder). */
+  const ensureSubcategoryForCategory = useCallback(
+    (categoryId) => {
+      if (!categoryId) return null;
+      const existing = [...subcategories]
+        .filter((s) => s.categoryId === categoryId)
+        .sort((a, b) => a.name.localeCompare(b.name));
+      if (existing[0]) return existing[0];
+      const row = { id: newId('sc'), name: '', categoryId };
+      persistSubcategories([...subcategories, row]);
+      return row;
+    },
+    [subcategories, persistSubcategories]
+  );
+
+  const renameSubcategory = useCallback(
+    (id, name) => {
+      const trimmed = sanitizePlainText(name).trim();
+      if (!trimmed) return;
+      persistSubcategories(
+        subcategories.map((s) => (s.id === id ? { ...s, name: trimmed } : s))
+      );
+    },
+    [subcategories, persistSubcategories]
+  );
+
+  const deleteSubcategory = useCallback(
+    (id) => {
+      const sc = subcategories.find((s) => s.id === id);
+      if (!sc) return;
+      const sameCat = subcategories.filter(
+        (s) => s.categoryId === sc.categoryId && s.id !== id
+      );
+      const fallback = sameCat[0]?.id;
+      if (!fallback) return;
+      persistSubcategories(subcategories.filter((s) => s.id !== id));
+      persistTasks(
+        tasks.map((t) =>
+          t.subcategoryId === id ? { ...t, subcategoryId: fallback } : t
+        )
+      );
+    },
+    [subcategories, tasks, persistSubcategories, persistTasks]
+  );
+
+  const addTask = useCallback(
+    (payload) => {
+      const clean = sanitizeRichHtml(payload.contentHTML);
+      const row = {
+        id: newId('task'),
+        contentHTML: clean,
+        categoryId: payload.categoryId,
+        subcategoryId: payload.subcategoryId,
+        time: payload.time ?? null,
+        recurrence: payload.recurrence,
+        order: {},
+      };
+      persistTasks([...tasks, row]);
+    },
+    [tasks, persistTasks]
+  );
+
+  const updateTask = useCallback(
+    (id, patch) => {
+      persistTasks(
+        tasks.map((t) => {
+          if (t.id !== id) return t;
+          const next = { ...t, ...patch };
+          if (patch.contentHTML !== undefined) {
+            next.contentHTML = sanitizeRichHtml(patch.contentHTML);
+          }
+          if (patch.recurrence) {
+            next.recurrence = patch.recurrence;
+          }
+          if (patch.time !== undefined) {
+            next.time = patch.time;
+          }
+          return next;
+        })
+      );
+    },
+    [tasks, persistTasks]
+  );
+
+  const deleteTask = useCallback(
+    (id) => {
+      persistTasks(tasks.filter((t) => t.id !== id));
+      const nextCompletions = { ...completions };
+      Object.keys(nextCompletions).forEach((date) => {
+        if (nextCompletions[date]?.[id] !== undefined) {
+          const copy = { ...nextCompletions[date] };
+          delete copy[id];
+          nextCompletions[date] = copy;
+        }
+      });
+      persistCompletions(nextCompletions);
+    },
+    [tasks, completions, persistTasks, persistCompletions]
+  );
+
+  const reorderTasksInGroup = useCallback(
+    (categoryId, subcategoryId, dayKey, orderedIds) => {
+      const anchor = anchorDateForWeekday(dayKey, new Date());
+      const iso = toISODate(anchor);
+      persistTasks(
+        tasks.map((t) => {
+          const idx = orderedIds.indexOf(t.id);
+          if (idx === -1) return t;
+          if (t.categoryId !== categoryId || t.subcategoryId !== subcategoryId)
+            return t;
+          if (!taskOccursOnDate(t.recurrence, anchor)) return t;
+          return {
+            ...t,
+            order: { ...t.order, [iso]: idx },
+          };
+        })
+      );
+    },
+    [tasks, persistTasks]
+  );
+
+  const toggleCompletion = useCallback(
+    (taskId, date = new Date()) => {
+      const task = tasks.find((t) => t.id === taskId);
+      if (!task || !taskOccursOnDate(task.recurrence, date)) return;
+      const key = toISODate(date);
+      const prevDay = { ...(completions[key] || {}) };
+      const nextVal = !prevDay[taskId];
+      if (nextVal) prevDay[taskId] = true;
+      else delete prevDay[taskId];
+      persistCompletions({ ...completions, [key]: prevDay });
+    },
+    [tasks, completions, persistCompletions]
+  );
+
+  const updateSettings = useCallback(
+    (patch) => {
+      persistSettings({ ...settings, ...patch });
+    },
+    [settings, persistSettings]
+  );
+
+  const value = useMemo(
+    () => ({
+      categories,
+      subcategories,
+      tasks,
+      completions,
+      settings,
+      addCategory,
+      renameCategory,
+      deleteCategory,
+      addSubcategory,
+      ensureSubcategoryForCategory,
+      renameSubcategory,
+      deleteSubcategory,
+      addTask,
+      updateTask,
+      deleteTask,
+      reorderTasksInGroup,
+      toggleCompletion,
+      updateSettings,
+    }),
+    [
+      categories,
+      subcategories,
+      tasks,
+      completions,
+      settings,
+      addCategory,
+      renameCategory,
+      deleteCategory,
+      addSubcategory,
+      ensureSubcategoryForCategory,
+      renameSubcategory,
+      deleteSubcategory,
+      addTask,
+      updateTask,
+      deleteTask,
+      reorderTasksInGroup,
+      toggleCompletion,
+      updateSettings,
+    ]
+  );
+
+  return (
+    <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>
+  );
+}
+
+export function useAppState() {
+  const ctx = useContext(AppStateContext);
+  if (!ctx) throw new Error('useAppState must be used within AppStateProvider');
+  return ctx;
+}
