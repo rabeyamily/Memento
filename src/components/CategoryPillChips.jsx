@@ -1,10 +1,6 @@
 import { useMemo, useState } from 'react';
 import { DEFAULT_SUBCATEGORY_ID } from '../utils/constants';
-import {
-  categoryChipLabel,
-  shouldHideDefaultSubPicker,
-  subcategoryChipLabel,
-} from '../utils/categoryDisplay';
+import { categoryChipLabel, subcategoryChipLabel } from '../utils/categoryDisplay';
 import { sanitizePlainText } from '../utils/sanitize';
 
 function ChipDelete({ label, onClick, disabled }) {
@@ -55,6 +51,14 @@ export function CategoryPillChips({
     () => [...subcategories].sort((a, b) => a.name.localeCompare(b.name)),
     [subcategories]
   );
+
+  /** Default “no subgroup” first so choosing no subcategory is obvious. */
+  const subsForChips = useMemo(() => {
+    const def = sortedSubs.find((s) => s.id === DEFAULT_SUBCATEGORY_ID);
+    const rest = sortedSubs.filter((s) => s.id !== DEFAULT_SUBCATEGORY_ID);
+    if (def) return [def, ...rest];
+    return sortedSubs;
+  }, [sortedSubs]);
 
   const saveCat = () => {
     const t = sanitizePlainText(catInput).trim();
@@ -143,110 +147,78 @@ export function CategoryPillChips({
 
       {categoryId && (
         <div className="space-y-2">
-          {shouldHideDefaultSubPicker(subcategories) ? (
-            <p className="text-[11px] text-muted-fg">
-              Subcategory is optional.{' '}
+          <p className="text-[11px] text-muted-fg">
+            Subcategory is optional. Use <span className="font-medium text-ink">None</span> if you do not want a
+            subgroup.
+          </p>
+          <div className="flex flex-wrap gap-x-1.5 gap-y-2">
+            {subsForChips.length === 0 ? (
+              <p className="text-[11px] text-muted-fg">Add a subcategory with + New.</p>
+            ) : (
+              subsForChips.map((s) => {
+                const selected = subcategoryId === s.id;
+                const canDelete =
+                  sortedSubs.length > 1 &&
+                  onDeleteSubcategory &&
+                  s.id !== DEFAULT_SUBCATEGORY_ID;
+                return (
+                  <span
+                    key={s.id}
+                    className={`inline-flex max-w-full overflow-hidden rounded-full border text-[11px] font-medium leading-none transition-colors ${
+                      selected ? chipOuterOn : chipOuterOff
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onSubcategoryChange(s.id)}
+                      className="min-h-[32px] shrink px-2.5 py-1.5 text-left"
+                    >
+                      {subcategoryChipLabel(s, DEFAULT_SUBCATEGORY_ID)}
+                    </button>
+                    {canDelete && (
+                      <ChipDelete
+                        label={`Delete subcategory ${subcategoryChipLabel(s, DEFAULT_SUBCATEGORY_ID)}`}
+                        onClick={() => onDeleteSubcategory(s.id)}
+                      />
+                    )}
+                  </span>
+                );
+              })
+            )}
+            {!newSubOpen ? (
               <button
                 type="button"
                 onClick={() => setNewSubOpen(true)}
-                className="font-medium text-ink underline decoration-muted-border underline-offset-2"
+                className="inline-flex min-h-[32px] items-center rounded-full border border-dashed border-muted-border bg-paper px-2.5 py-1.5 text-[11px] font-medium leading-none text-muted-fg"
               >
-                Add subgroup
-              </button>{' '}
-              if you want one.
-            </p>
-          ) : (
-            <div className="flex flex-wrap gap-x-1.5 gap-y-2">
-              {sortedSubs.length === 0 ? (
-                <p className="text-[11px] text-muted-fg">Add a subcategory with + New.</p>
-              ) : (
-                sortedSubs.map((s) => {
-                  const selected = subcategoryId === s.id;
-                  const canDeleteMoreThanOne = sortedSubs.length > 1 && onDeleteSubcategory;
-                  return (
-                    <span
-                      key={s.id}
-                      className={`inline-flex max-w-full overflow-hidden rounded-full border text-[11px] font-medium leading-none transition-colors ${
-                        selected ? chipOuterOn : chipOuterOff
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => onSubcategoryChange(s.id)}
-                        className="min-h-[32px] shrink px-2.5 py-1.5 text-left"
-                      >
-                        {subcategoryChipLabel(s, DEFAULT_SUBCATEGORY_ID)}
-                      </button>
-                      {canDeleteMoreThanOne && (
-                        <ChipDelete
-                          label={`Delete subcategory ${subcategoryChipLabel(s, DEFAULT_SUBCATEGORY_ID)}`}
-                          onClick={() => onDeleteSubcategory(s.id)}
-                        />
-                      )}
-                    </span>
-                  );
-                })
-              )}
-              {!newSubOpen ? (
+                + New
+              </button>
+            ) : (
+              <div className="flex min-w-[9rem] max-w-full shrink-0 items-center gap-1 rounded-full border border-muted-border bg-paper px-2 py-0.5">
+                <input
+                  autoFocus
+                  value={subInput}
+                  onChange={(e) => setSubInput(sanitizePlainText(e.target.value))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') saveSub();
+                    if (e.key === 'Escape') {
+                      setNewSubOpen(false);
+                      setSubInput('');
+                    }
+                  }}
+                  placeholder="Name"
+                  className="min-w-0 flex-1 bg-transparent px-1 py-1 text-[11px] outline-none"
+                />
                 <button
                   type="button"
-                  onClick={() => setNewSubOpen(true)}
-                  className="inline-flex min-h-[32px] items-center rounded-full border border-dashed border-muted-border bg-paper px-2.5 py-1.5 text-[11px] font-medium leading-none text-muted-fg"
+                  onClick={saveSub}
+                  className="rounded-full bg-accent px-2 py-0.5 text-[10px] font-medium text-[#111]"
                 >
-                  + New
+                  Add
                 </button>
-              ) : (
-                <div className="flex min-w-[9rem] max-w-full shrink-0 items-center gap-1 rounded-full border border-muted-border bg-paper px-2 py-0.5">
-                  <input
-                    autoFocus
-                    value={subInput}
-                    onChange={(e) => setSubInput(sanitizePlainText(e.target.value))}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') saveSub();
-                      if (e.key === 'Escape') {
-                        setNewSubOpen(false);
-                        setSubInput('');
-                      }
-                    }}
-                    placeholder="Name"
-                    className="min-w-0 flex-1 bg-transparent px-1 py-1 text-[11px] outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={saveSub}
-                    className="rounded-full bg-accent px-2 py-0.5 text-[10px] font-medium text-[#111]"
-                  >
-                    Add
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-          {shouldHideDefaultSubPicker(subcategories) && newSubOpen && (
-            <div className="flex min-w-[9rem] max-w-full shrink-0 items-center gap-1 rounded-full border border-muted-border bg-paper px-2 py-0.5">
-              <input
-                autoFocus
-                value={subInput}
-                onChange={(e) => setSubInput(sanitizePlainText(e.target.value))}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') saveSub();
-                  if (e.key === 'Escape') {
-                    setNewSubOpen(false);
-                    setSubInput('');
-                  }
-                }}
-                placeholder="Name"
-                className="min-w-0 flex-1 bg-transparent px-1 py-1 text-[11px] outline-none"
-              />
-              <button
-                type="button"
-                onClick={saveSub}
-                className="rounded-full bg-accent px-2 py-0.5 text-[10px] font-medium text-[#111]"
-              >
-                Add
-              </button>
-            </div>
-          )}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

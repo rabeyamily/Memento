@@ -299,6 +299,7 @@ export function AppStateProvider({ children }) {
 
   const deleteSubcategory = useCallback(
     (id) => {
+      if (id === DEFAULT_SUBCATEGORY_ID) return;
       const others = subcategories.filter((s) => s.id !== id);
       if (others.length === 0) return;
       const fallback =

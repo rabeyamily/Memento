@@ -113,10 +113,12 @@ export function Tasks() {
     [categories]
   );
 
-  const sortedSubs = useMemo(
-    () => [...subcategories].sort((a, b) => a.name.localeCompare(b.name)),
-    [subcategories]
-  );
+  const sortedSubs = useMemo(() => {
+    const list = [...subcategories].sort((a, b) => a.name.localeCompare(b.name));
+    const def = list.find((s) => s.id === DEFAULT_SUBCATEGORY_ID);
+    const rest = list.filter((s) => s.id !== DEFAULT_SUBCATEGORY_ID);
+    return def ? [def, ...rest] : list;
+  }, [subcategories]);
 
   const taskPairs = useMemo(() => {
     const byKey = new Map();
@@ -261,7 +263,7 @@ export function Tasks() {
         ? {
             title: 'Delete subcategory?',
             message:
-              'Tasks that use this subcategory will be reassigned to another subcategory (you need at least one subcategory in the app).',
+              'Tasks that use this subcategory will use None (no subgroup) instead. The built-in None option cannot be removed.',
           }
         : null;
 
@@ -291,9 +293,10 @@ export function Tasks() {
             Category (optional)
           </p>
           <p className="mb-4 text-xs text-muted-fg">
-            Categories and subcategories are separate lists—pick any pair for this task, or use{' '}
-            <span className="font-medium text-ink">+ New</span>. You can also add names under{' '}
-            <span className="font-medium text-ink">Manage</span> below.
+            Categories and subcategories are separate lists—pick any pair for this task. Subcategory is optional: keep{' '}
+            <span className="font-medium text-ink">None</span> if you do not want a subgroup. Use{' '}
+            <span className="font-medium text-ink">+ New</span> or <span className="font-medium text-ink">Manage</span>{' '}
+            to add labels.
           </p>
           <CategoryPillChips
             categoryId={categoryId}
@@ -580,6 +583,10 @@ export function Tasks() {
               <p className="mb-3 text-[11px] font-medium uppercase tracking-wide text-[#999]">
                 Subcategories
               </p>
+              <p className="mb-3 text-xs text-muted-fg">
+                Tasks can use <span className="font-medium text-ink">None</span> so a subgroup is always optional. The
+                first row is that built-in option (rename it only if you want a different default label).
+              </p>
               <div className="mb-4 flex flex-wrap items-end gap-2 border-b border-muted-border pb-4">
                 <input
                   aria-label="New subcategory name"
@@ -631,13 +638,15 @@ export function Tasks() {
                       }
                       className="min-h-[40px] min-w-[6rem] flex-1 rounded border border-muted-border px-2 py-2 text-sm"
                     />
-                    <button
-                      type="button"
-                      onClick={() => onDeleteSub(s.id)}
-                      className="text-xs text-muted-fg underline"
-                    >
-                      Remove
-                    </button>
+                    {s.id !== DEFAULT_SUBCATEGORY_ID ? (
+                      <button
+                        type="button"
+                        onClick={() => onDeleteSub(s.id)}
+                        className="text-xs text-muted-fg underline"
+                      >
+                        Remove
+                      </button>
+                    ) : null}
                   </li>
                 ))}
               </ul>
