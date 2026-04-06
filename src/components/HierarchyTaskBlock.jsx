@@ -30,26 +30,36 @@ export function HierarchyTaskBlock({
   const dayKey = getDayKey(today);
   const map = completions[iso] || {};
 
-  const sortedCats = [...categories].sort((a, b) => a.name.localeCompare(b.name));
-
-  const blocks = sortedCats.flatMap((cat) => {
-    const subs = subcategories
-      .filter((s) => s.categoryId === cat.id)
-      .sort((a, b) => a.name.localeCompare(b.name));
-    return subs
-      .map((sub) => {
-        const pool = tasks.filter(
-          (t) =>
-            t.categoryId === cat.id &&
-            t.subcategoryId === sub.id &&
-            taskOccursOnDate(t.recurrence, today)
-        );
-        const ordered = sortTasksForDate(pool, today);
-        if (ordered.length === 0) return null;
-        return { cat, sub, ordered };
-      })
-      .filter(Boolean);
+  const pairKeys = new Set();
+  const pairs = [];
+  for (const t of tasks) {
+    if (!taskOccursOnDate(t.recurrence, today)) continue;
+    const key = `${t.categoryId}\0${t.subcategoryId}`;
+    if (pairKeys.has(key)) continue;
+    pairKeys.add(key);
+    const cat = categories.find((c) => c.id === t.categoryId);
+    const sub = subcategories.find((s) => s.id === t.subcategoryId);
+    if (cat && sub) pairs.push({ cat, sub });
+  }
+  pairs.sort((a, b) => {
+    const c = a.cat.name.localeCompare(b.cat.name);
+    if (c !== 0) return c;
+    return a.sub.name.localeCompare(b.sub.name);
   });
+
+  const blocks = pairs
+    .map(({ cat, sub }) => {
+      const pool = tasks.filter(
+        (t) =>
+          t.categoryId === cat.id &&
+          t.subcategoryId === sub.id &&
+          taskOccursOnDate(t.recurrence, today)
+      );
+      const ordered = sortTasksForDate(pool, today);
+      if (ordered.length === 0) return null;
+      return { cat, sub, ordered };
+    })
+    .filter(Boolean);
 
   if (blocks.length === 0) return null;
 
@@ -79,7 +89,13 @@ export function HierarchyTaskBlock({
                 const subHead = (sub.name || '').trim();
                 return (
                 <div key={sub.id}>
-                  {subHead ? <p className="mb-1.5 text-sm text-muted-fg">{subHead}</p> : null}
+                  {subHead ? (
+                    <div className="mb-1.5">
+                      <span className="inline-flex max-w-full rounded-md border border-muted-border bg-paper/95 px-2.5 py-1 text-base font-medium leading-snug text-ink">
+                        {subHead}
+                      </span>
+                    </div>
+                  ) : null}
                   <DraggableTaskList
                     compact
                     dayKey={dayKey}

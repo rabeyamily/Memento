@@ -167,6 +167,10 @@ export function RichTextEditor({
     const on = floating ? toolOnFloat : compactCard ? toolOnCard : toolOn;
     const hiBtnClass = floating ? toolOffFloat : compactCard ? toolOffCard : toolOff;
     const popSide = floating ? 'top-full mt-1' : 'bottom-full mb-1';
+    const swatchClass = compactCard
+      ? 'h-5 w-5 shrink-0 rounded-full border border-muted-border'
+      : 'h-6 w-6 shrink-0 rounded-full border border-muted-border';
+    const popRowClass = `absolute left-1/2 z-30 flex -translate-x-1/2 flex-row flex-nowrap items-center gap-1 rounded-lg border border-muted-border bg-paper p-1.5 shadow-sm [scrollbar-width:none] sm:gap-1.5 sm:p-2 [&::-webkit-scrollbar]:hidden ${popSide} max-w-[calc(100dvw-env(safe-area-inset-left)-env(safe-area-inset-right)-0.75rem)] overflow-x-auto`;
 
     const toolbarRowClass = floating
       ? 'relative z-10 flex flex-wrap items-center justify-evenly gap-1 rounded-lg border border-muted-border bg-paper px-2 py-2'
@@ -175,49 +179,49 @@ export function RichTextEditor({
         : 'relative z-10 flex flex-wrap items-center justify-evenly gap-1 px-2 py-1.5';
 
     return (
-      <div
-        className={toolbarRowClass}
-        onMouseDown={(e) => e.preventDefault()}
-        role="toolbar"
-        aria-label="Text formatting"
-      >
-        <button
-          type="button"
-          className={active.bold ? on : off}
-          onClick={() => runFormat('bold')}
-          aria-label="Bold"
-          aria-pressed={active.bold}
+      <div className="relative w-full">
+        <div
+          className={toolbarRowClass}
+          onMouseDown={(e) => e.preventDefault()}
+          role="toolbar"
+          aria-label="Text formatting"
         >
-          <span className="text-base font-bold">B</span>
-        </button>
-        <button
-          type="button"
-          className={`${active.italic ? on : off} italic`}
-          onClick={() => runFormat('italic')}
-          aria-label="Italic"
-          aria-pressed={active.italic}
-        >
-          <span className="text-base font-bold">I</span>
-        </button>
-        <button
-          type="button"
-          className={active.underline ? on : off}
-          onClick={() => runFormat('underline')}
-          aria-label="Underline"
-          aria-pressed={active.underline}
-        >
-          <span className="text-base font-bold">U</span>
-        </button>
-        <button
-          type="button"
-          className={active.strikeThrough ? on : off}
-          onClick={() => runFormat('strikeThrough')}
-          aria-label="Strikethrough"
-          aria-pressed={active.strikeThrough}
-        >
-          <span className="text-base font-bold">S</span>
-        </button>
-        <div className="relative">
+          <button
+            type="button"
+            className={active.bold ? on : off}
+            onClick={() => runFormat('bold')}
+            aria-label="Bold"
+            aria-pressed={active.bold}
+          >
+            <span className="text-base font-bold">B</span>
+          </button>
+          <button
+            type="button"
+            className={`${active.italic ? on : off} italic`}
+            onClick={() => runFormat('italic')}
+            aria-label="Italic"
+            aria-pressed={active.italic}
+          >
+            <span className="text-base font-bold">I</span>
+          </button>
+          <button
+            type="button"
+            className={active.underline ? on : off}
+            onClick={() => runFormat('underline')}
+            aria-label="Underline"
+            aria-pressed={active.underline}
+          >
+            <span className="text-base font-bold">U</span>
+          </button>
+          <button
+            type="button"
+            className={active.strikeThrough ? on : off}
+            onClick={() => runFormat('strikeThrough')}
+            aria-label="Strikethrough"
+            aria-pressed={active.strikeThrough}
+          >
+            <span className="text-base font-bold">S</span>
+          </button>
           <button
             type="button"
             className={`${hiBtnClass} relative overflow-visible p-0`}
@@ -243,24 +247,6 @@ export function RichTextEditor({
               aria-hidden
             />
           </button>
-          {showHi && (
-            <div
-              className={`absolute left-1/2 z-30 flex -translate-x-1/2 gap-1.5 rounded-lg border border-muted-border bg-paper p-2 ${popSide}`}
-            >
-              {HIGHLIGHT_SWATCHES.map((s) => (
-                <button
-                  key={s.hex}
-                  type="button"
-                  title={s.label}
-                  className="h-6 w-6 shrink-0 rounded-full border border-muted-border"
-                  style={{ backgroundColor: s.hex }}
-                  onClick={() => applyHighlightColor(s.hex)}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="relative">
           <button
             type="button"
             className={off}
@@ -276,23 +262,35 @@ export function RichTextEditor({
               style={{ backgroundColor: 'var(--text-color, #111)' }}
             />
           </button>
-          {showColors && (
-            <div
-              className={`absolute left-0 z-20 flex gap-1 rounded border border-muted-border bg-paper p-2 ${popSide}`}
-            >
-              {TEXT_COLORS.map((c) => (
-                <button
-                  key={c.hex}
-                  type="button"
-                  title={c.label}
-                  className="h-6 w-6 rounded-full border border-muted-border"
-                  style={{ backgroundColor: c.hex }}
-                  onClick={() => applyForeColor(c.hex)}
-                />
-              ))}
-            </div>
-          )}
         </div>
+        {showHi && (
+          <div className={popRowClass} role="listbox" aria-label="Highlight colors">
+            {HIGHLIGHT_SWATCHES.map((s) => (
+              <button
+                key={s.hex}
+                type="button"
+                title={s.label}
+                className={swatchClass}
+                style={{ backgroundColor: s.hex }}
+                onClick={() => applyHighlightColor(s.hex)}
+              />
+            ))}
+          </div>
+        )}
+        {showColors && (
+          <div className={popRowClass} role="listbox" aria-label="Text colors">
+            {TEXT_COLORS.map((c) => (
+              <button
+                key={c.hex}
+                type="button"
+                title={c.label}
+                className={swatchClass}
+                style={{ backgroundColor: c.hex }}
+                onClick={() => applyForeColor(c.hex)}
+              />
+            ))}
+          </div>
+        )}
       </div>
     );
   };

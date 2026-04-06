@@ -50,6 +50,13 @@ const defaultRec = () => ({
   endDate: null,
 });
 
+function pickDefaultSubId(subs) {
+  const byDefault = subs.find((s) => s.id === DEFAULT_SUBCATEGORY_ID);
+  if (byDefault) return byDefault.id;
+  const sorted = [...subs].sort((a, b) => a.name.localeCompare(b.name));
+  return sorted[0]?.id ?? DEFAULT_SUBCATEGORY_ID;
+}
+
 export function Tasks() {
   const {
     categories,
@@ -61,7 +68,6 @@ export function Tasks() {
     reorderTasksInGroup,
     addCategory,
     addSubcategory,
-    ensureSubcategoryForCategory,
     renameCategory,
     renameSubcategory,
     deleteCategory,
@@ -76,8 +82,8 @@ export function Tasks() {
   const [editorKey, setEditorKey] = useState(0);
   const [initialHtml, setInitialHtml] = useState('');
   const [categoryId, setCategoryId] = useState(() => categories[0]?.id ?? DEFAULT_CATEGORY_ID);
-  const [subcategoryId, setSubcategoryId] = useState(
-    () => subcategories.find((s) => s.categoryId === categories[0]?.id)?.id ?? ''
+  const [subcategoryId, setSubcategoryId] = useState(() =>
+    pickDefaultSubId(subcategories)
   );
   const [recurrence, setRecurrence] = useState(defaultRec);
   const [editingId, setEditingId] = useState(null);
@@ -87,16 +93,17 @@ export function Tasks() {
   const [managerOpen, setManagerOpen] = useState(false);
   const [flashSuccess, setFlashSuccess] = useState(false);
   const [deletePrompt, setDeletePrompt] = useState(null);
+  const [managerNewCatName, setManagerNewCatName] = useState('');
+  const [managerNewSubName, setManagerNewSubName] = useState('');
   const lastEditQuery = useRef(null);
 
   const today = new Date();
   const todayDayKey = getDayKey(today);
 
   useEffect(() => {
-    const subs = subcategories.filter((s) => s.categoryId === categoryId);
-    const valid = subs.some((s) => s.id === subcategoryId);
-    if (!valid && subs[0]) setSubcategoryId(subs[0].id);
-  }, [categoryId, subcategories, subcategoryId]);
+    if (subcategories.some((s) => s.id === subcategoryId)) return;
+    setSubcategoryId(pickDefaultSubId(subcategories));
+  }, [subcategories, subcategoryId]);
 
   const catName = (id) => categories.find((c) => c.id === id)?.name ?? '';
   const subName = (id) => subcategories.find((s) => s.id === id)?.name ?? '';
@@ -106,15 +113,31 @@ export function Tasks() {
     [categories]
   );
 
-  /** Ensures subcategory belongs to category (avoids “orphan” tasks that match no list section). */
-  const resolveSubcategoryForSave = (catId, currentSubId) => {
-    const subs = [...subcategories]
-      .filter((s) => s.categoryId === catId)
-      .sort((a, b) => a.name.localeCompare(b.name));
-    if (subs.some((s) => s.id === currentSubId)) return currentSubId;
-    if (subs[0]) return subs[0].id;
-    const row = ensureSubcategoryForCategory(catId);
-    return row?.id ?? DEFAULT_SUBCATEGORY_ID;
+  const sortedSubs = useMemo(
+    () => [...subcategories].sort((a, b) => a.name.localeCompare(b.name)),
+    [subcategories]
+  );
+
+  const taskPairs = useMemo(() => {
+    const byKey = new Map();
+    for (const t of tasks) {
+      const key = `${t.categoryId}\0${t.subcategoryId}`;
+      if (!byKey.has(key)) {
+        byKey.set(key, { categoryId: t.categoryId, subcategoryId: t.subcategoryId });
+      }
+    }
+    const catLabel = (id) => (categories.find((c) => c.id === id)?.name || '').trim();
+    const subLabel = (id) => (subcategories.find((s) => s.id === id)?.name || '').trim();
+    return [...byKey.values()].sort((a, b) => {
+      const c = catLabel(a.categoryId).localeCompare(catLabel(b.categoryId));
+      if (c !== 0) return c;
+      return subLabel(a.subcategoryId).localeCompare(subLabel(b.subcategoryId));
+    });
+  }, [tasks, categories, subcategories]);
+
+  const resolveSubcategoryForSave = (currentSubId) => {
+    if (subcategories.some((s) => s.id === currentSubId)) return currentSubId;
+    return pickDefaultSubId(subcategories);
   };
 
   const resetForm = () => {
@@ -124,10 +147,7 @@ export function Tasks() {
     setRecurrence(defaultRec());
     setEditingId(null);
     setCategoryId(categories[0]?.id ?? DEFAULT_CATEGORY_ID);
-    const firstSub = subcategories.find(
-      (s) => s.categoryId === (categories[0]?.id ?? DEFAULT_CATEGORY_ID)
-    );
-    setSubcategoryId(firstSub?.id ?? '');
+    setSubcategoryId(pickDefaultSubId(subcategories));
     setTaskTime('');
     setTimeExpanded(false);
     navigate('/tasks', { replace: true });
@@ -140,7 +160,7 @@ export function Tasks() {
     if (rec.type === 'days_of_week' && rec.days.length === 0) return;
 
     const timeVal = taskTime.trim() || null;
-    const subId = resolveSubcategoryForSave(categoryId, subcategoryId);
+    const subId = resolveSubcategoryForSave(subcategoryId);
     if (subId !== subcategoryId) setSubcategoryId(subId);
 
     if (editingId) {
@@ -235,22 +255,22 @@ export function Tasks() {
       ? {
           title: 'Delete category?',
           message:
-            'Tasks in this category will become uncategorized (no category label). Subcategories under it will be removed.',
+            'Tasks in this category will move to the default category. Their subcategory labels stay as you set them.',
         }
       : deletePrompt?.type === 'sub'
         ? {
             title: 'Delete subcategory?',
             message:
-              'Tasks that use this subcategory will be reassigned to another subcategory in the same category.',
+              'Tasks that use this subcategory will be reassigned to another subcategory (you need at least one subcategory in the app).',
           }
         : null;
 
   return (
     <div className="mx-auto max-w-2xl space-y-12 pb-24">
       <div className="flex flex-col gap-3">
-        <header className="flex flex-wrap items-baseline gap-4">
-          <h1 className="font-display text-[32px] leading-snug text-ink">Tasks</h1>
-          <span className="rounded-full border border-muted-border bg-paper px-2.5 py-1 text-xs font-medium tabular-nums text-muted-fg">
+        <header className="flex flex-wrap items-center gap-3 sm:gap-4">
+          <h1 className="font-display text-[32px] leading-tight text-ink">Tasks</h1>
+          <span className="rounded-full border border-muted-border bg-paper px-2.5 py-1 text-xs font-medium tabular-nums leading-none text-muted-fg">
             {tasks.length} tasks
           </span>
         </header>
@@ -267,8 +287,13 @@ export function Tasks() {
         </div>
 
         <div className="rounded-xl border border-muted-border bg-paper p-5">
-          <p className="mb-4 text-[11px] font-medium uppercase tracking-wide text-[#999]">
+          <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-[#999]">
             Category (optional)
+          </p>
+          <p className="mb-4 text-xs text-muted-fg">
+            Categories and subcategories are separate lists—pick any pair for this task, or use{' '}
+            <span className="font-medium text-ink">+ New</span>. You can also add names under{' '}
+            <span className="font-medium text-ink">Manage</span> below.
           </p>
           <CategoryPillChips
             categoryId={categoryId}
@@ -279,7 +304,6 @@ export function Tasks() {
             subcategories={subcategories}
             onAddCategory={addCategory}
             onAddSubcategory={addSubcategory}
-            onEnsureSubcategory={ensureSubcategoryForCategory}
             onDeleteCategory={onDeleteCategory}
             onDeleteSubcategory={onDeleteSub}
             defaultCategoryId={DEFAULT_CATEGORY_ID}
@@ -351,113 +375,109 @@ export function Tasks() {
       </div>
 
       <section className="space-y-12">
-        {sortedCats.flatMap((cat) => {
-          const subs = subcategories
-            .filter((s) => s.categoryId === cat.id)
-            .sort((a, b) => a.name.localeCompare(b.name));
-          return subs
-            .map((sub) => {
-              const pool = tasks.filter(
-                (t) => t.categoryId === cat.id && t.subcategoryId === sub.id
-              );
-              if (pool.length === 0) return null;
-              const ordered = sortTasksForDate(pool, today);
-              const catHeading = (cat.name || '').trim();
-              const subHeading = (sub.name || '').trim();
-              return (
-                <div key={`${cat.id}-${sub.id}`}>
-                  {(catHeading || subHeading) && (
-                    <div className="mb-4">
-                      {catHeading ? (
-                        <h3 className="font-display text-lg text-ink">{catHeading}</h3>
-                      ) : null}
-                      {subHeading ? (
-                        <p className="mt-1 text-sm text-muted-fg">{subHeading}</p>
-                      ) : null}
-                    </div>
-                  )}
-                  <div className="rounded-xl border border-muted-border bg-paper/80">
-                    <DraggableTaskList
-                      dayKey={todayDayKey}
-                      orderedTasks={ordered}
-                      onReorder={(ids) =>
-                        reorderTasksInGroup(cat.id, sub.id, todayDayKey, ids)
-                      }
-                      renderRow={(task, { dragHandle }) => {
-                        const armed = armedDeleteTaskId === task.id;
-                        const summary = recurrenceSummary(task.recurrence);
-                        const badgeCat = (catName(task.categoryId) || '').trim();
-                        const badgeSub = (subName(task.subcategoryId) || '').trim();
-                        const showBadges = Boolean(badgeCat || badgeSub);
-                        return (
-                          <div className="flex w-full min-w-0 items-center gap-3">
-                            <div className="flex shrink-0 items-center self-stretch">{dragHandle}</div>
-                            <button
-                              type="button"
-                              className="min-w-0 flex-1 text-left"
-                              onClick={() => startEdit(task)}
-                            >
-                              <div className="text-base text-ink">
-                                <SafeRichText html={task.contentHTML} />
-                              </div>
-                              <p className="mt-1 text-xs text-muted-fg">{summary}</p>
-                            </button>
-                            <div className="flex shrink-0 flex-col items-end gap-1.5">
-                              {showBadges && (
-                                <div className="flex flex-wrap justify-end gap-1">
-                                  {badgeCat ? <CategoryBadge name={badgeCat} /> : null}
-                                  {badgeSub ? <SubcategoryBadge name={badgeSub} /> : null}
-                                </div>
-                              )}
-                              {formatTimeBadge(task.time) && (
-                                <span className="rounded-full border border-muted-border px-2 py-0.5 text-[11px] tabular-nums text-muted-fg">
-                                  {formatTimeBadge(task.time)}
-                                </span>
-                              )}
-                            </div>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (armed) {
-                                  deleteTask(task.id);
-                                  setArmedDeleteTaskId(null);
-                                } else {
-                                  setArmedDeleteTaskId(task.id);
-                                }
-                              }}
-                              className={`shrink-0 p-2 transition-colors ${
-                                armed
-                                  ? 'text-red-600'
-                                  : 'text-muted-fg hover:text-red-600/90'
-                              }`}
-                              aria-label={armed ? 'Tap again to delete' : 'Delete task'}
-                            >
-                              <svg
-                                width="20"
-                                height="20"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              >
-                                <polyline points="3 6 5 6 21 6" />
-                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                                <line x1="10" y1="11" x2="10" y2="17" />
-                                <line x1="14" y1="11" x2="14" y2="17" />
-                              </svg>
-                            </button>
-                          </div>
-                        );
-                      }}
-                    />
-                  </div>
+        {taskPairs.map(({ categoryId: catId, subcategoryId: subId }) => {
+          const cat = categories.find((c) => c.id === catId);
+          const sub = subcategories.find((s) => s.id === subId);
+          if (!cat || !sub) return null;
+          const pool = tasks.filter(
+            (t) => t.categoryId === catId && t.subcategoryId === subId
+          );
+          if (pool.length === 0) return null;
+          const ordered = sortTasksForDate(pool, today);
+          const catHeading = (cat.name || '').trim();
+          const subHeading = (sub.name || '').trim();
+          return (
+            <div key={`${catId}-${subId}`}>
+              {(catHeading || subHeading) && (
+                <div className="mb-4">
+                  {catHeading ? (
+                    <h3 className="font-display text-lg text-ink">{catHeading}</h3>
+                  ) : null}
+                  {subHeading ? (
+                    <p className="mt-1.5 text-base font-medium leading-snug text-ink">{subHeading}</p>
+                  ) : null}
                 </div>
-              );
-            })
-            .filter(Boolean);
+              )}
+              <div className="rounded-xl border border-muted-border bg-paper/80">
+                <DraggableTaskList
+                  dayKey={todayDayKey}
+                  orderedTasks={ordered}
+                  onReorder={(ids) =>
+                    reorderTasksInGroup(catId, subId, todayDayKey, ids)
+                  }
+                  renderRow={(task, { dragHandle }) => {
+                    const armed = armedDeleteTaskId === task.id;
+                    const summary = recurrenceSummary(task.recurrence);
+                    const badgeCat = (catName(task.categoryId) || '').trim();
+                    const badgeSub = (subName(task.subcategoryId) || '').trim();
+                    const showBadges = Boolean(badgeCat || badgeSub);
+                    return (
+                      <div className="flex w-full min-w-0 items-center gap-3">
+                        <div className="flex shrink-0 items-center self-stretch">{dragHandle}</div>
+                        <button
+                          type="button"
+                          className="min-w-0 flex-1 text-left"
+                          onClick={() => startEdit(task)}
+                        >
+                          <div className="text-base text-ink">
+                            <SafeRichText html={task.contentHTML} />
+                          </div>
+                          <p className="mt-1 text-xs text-muted-fg">{summary}</p>
+                        </button>
+                        <div className="flex shrink-0 flex-col items-end gap-1.5">
+                          {showBadges && (
+                            <div className="flex flex-wrap justify-end gap-1">
+                              {badgeCat ? <CategoryBadge name={badgeCat} /> : null}
+                              {badgeSub ? <SubcategoryBadge name={badgeSub} /> : null}
+                            </div>
+                          )}
+                          {formatTimeBadge(task.time) && (
+                            <span className="rounded-full border border-muted-border px-2 py-0.5 text-[11px] tabular-nums text-muted-fg">
+                              {formatTimeBadge(task.time)}
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (armed) {
+                              deleteTask(task.id);
+                              setArmedDeleteTaskId(null);
+                            } else {
+                              setArmedDeleteTaskId(task.id);
+                            }
+                          }}
+                          className={`shrink-0 p-2 transition-colors ${
+                            armed
+                              ? 'text-red-600'
+                              : 'text-muted-fg hover:text-red-600/90'
+                          }`}
+                          aria-label={armed ? 'Tap again to delete' : 'Delete task'}
+                        >
+                          <svg
+                            width="20"
+                            height="20"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            <line x1="10" y1="11" x2="10" y2="17" />
+                            <line x1="14" y1="11" x2="14" y2="17" />
+                          </svg>
+                        </button>
+                      </div>
+                    );
+                  }}
+                />
+              </div>
+            </div>
+          );
         })}
         {tasks.length === 0 && (
           <p className="text-center text-sm text-muted-fg">No tasks yet. Add one above.</p>
@@ -473,65 +493,155 @@ export function Tasks() {
           <h2 className="font-display text-xl text-ink">Categories &amp; subcategories</h2>
           <span className="text-sm text-muted-fg">{managerOpen ? 'Hide' : 'Manage'}</span>
         </button>
+        {!managerOpen && (
+          <p className="mt-2 text-sm text-muted-fg">
+            Open <span className="font-medium text-ink">Manage</span> to rename or remove labels. Subcategories are
+            not tied to a single category—you mix and match when you add a task.
+          </p>
+        )}
         {managerOpen && (
           <div className="mt-6 space-y-5">
-            {sortedCats.map((cat) => {
-              const subs = subcategories
-                .filter((s) => s.categoryId === cat.id)
-                .sort((a, b) => a.name.localeCompare(b.name));
-              return (
-                <div key={cat.id} className="rounded-xl border border-muted-border bg-paper p-5">
-                  <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-end gap-2 rounded-xl border border-dashed border-muted-border bg-paper/80 p-4">
+              <div className="min-w-[12rem] flex-1">
+                <label
+                  htmlFor="manager-new-cat"
+                  className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-[#999]"
+                >
+                  New category
+                </label>
+                <input
+                  id="manager-new-cat"
+                  value={managerNewCatName}
+                  onChange={(e) => setManagerNewCatName(sanitizePlainText(e.target.value))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      const t = managerNewCatName.trim();
+                      if (!t) return;
+                      const row = addCategory(t);
+                      if (row) {
+                        setManagerNewCatName('');
+                        showToast('Category added');
+                      }
+                    }
+                  }}
+                  placeholder="e.g. Morning, Work"
+                  className="min-h-[44px] w-full rounded-lg border border-muted-border px-3 py-2 text-sm text-ink"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const t = managerNewCatName.trim();
+                  if (!t) return;
+                  const row = addCategory(t);
+                  if (row) {
+                    setManagerNewCatName('');
+                    showToast('Category added');
+                  }
+                }}
+                className="min-h-[44px] rounded-full border border-muted-border bg-accent px-4 text-sm font-medium text-[#111]"
+              >
+                Add category
+              </button>
+            </div>
+            <p className="text-xs text-muted-fg">
+              Edit category names below; subcategories live in their own list and pair with a category only when you
+              assign a task.
+            </p>
+            {sortedCats.map((cat) => (
+              <div key={cat.id} className="rounded-xl border border-muted-border bg-paper p-5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    value={cat.name}
+                    onChange={(e) =>
+                      renameCategory(cat.id, sanitizePlainText(e.target.value))
+                    }
+                    placeholder={
+                      cat.id === DEFAULT_CATEGORY_ID
+                        ? 'Leave blank to show tasks without a category title'
+                        : undefined
+                    }
+                    className="min-h-[44px] min-w-[8rem] flex-1 rounded-lg border border-muted-border px-2 py-2 font-medium text-ink"
+                  />
+                  {cat.id !== DEFAULT_CATEGORY_ID && (
+                    <button
+                      type="button"
+                      onClick={() => onDeleteCategory(cat.id)}
+                      className="text-xs text-red-600"
+                    >
+                      Delete category
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+            <div className="rounded-xl border border-muted-border bg-paper p-5">
+              <p className="mb-3 text-[11px] font-medium uppercase tracking-wide text-[#999]">
+                Subcategories
+              </p>
+              <div className="mb-4 flex flex-wrap items-end gap-2 border-b border-muted-border pb-4">
+                <input
+                  aria-label="New subcategory name"
+                  value={managerNewSubName}
+                  onChange={(e) => setManagerNewSubName(sanitizePlainText(e.target.value))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      const t = managerNewSubName.trim();
+                      if (!t) return;
+                      const row = addSubcategory(t);
+                      if (row) {
+                        setManagerNewSubName('');
+                        showToast('Subcategory added');
+                      }
+                    }
+                  }}
+                  placeholder="New subcategory name"
+                  className="min-h-[40px] min-w-[10rem] flex-1 rounded-lg border border-muted-border px-2 py-2 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const t = managerNewSubName.trim();
+                    if (!t) return;
+                    const row = addSubcategory(t);
+                    if (row) {
+                      setManagerNewSubName('');
+                      showToast('Subcategory added');
+                    }
+                  }}
+                  className="min-h-[40px] rounded-full border border-muted-border px-3 text-sm font-medium text-ink"
+                >
+                  Add subcategory
+                </button>
+              </div>
+              <ul className="space-y-2">
+                {sortedSubs.map((s) => (
+                  <li key={s.id} className="flex flex-wrap items-center gap-2">
                     <input
-                      value={cat.name}
+                      value={s.name}
                       onChange={(e) =>
-                        renameCategory(cat.id, sanitizePlainText(e.target.value))
+                        renameSubcategory(s.id, sanitizePlainText(e.target.value))
                       }
                       placeholder={
-                        cat.id === DEFAULT_CATEGORY_ID
-                          ? 'Leave blank to show tasks without a category title'
+                        s.id === DEFAULT_SUBCATEGORY_ID
+                          ? 'Leave blank for no sub-label on tasks'
                           : undefined
                       }
-                      className="min-h-[44px] min-w-[8rem] flex-1 rounded-lg border border-muted-border px-2 py-2 font-medium text-ink"
+                      className="min-h-[40px] min-w-[6rem] flex-1 rounded border border-muted-border px-2 py-2 text-sm"
                     />
-                    {cat.id !== DEFAULT_CATEGORY_ID && (
-                      <button
-                        type="button"
-                        onClick={() => onDeleteCategory(cat.id)}
-                        className="text-xs text-red-600"
-                      >
-                        Delete category
-                      </button>
-                    )}
-                  </div>
-                  <ul className="mt-3 space-y-2 pl-2">
-                    {subs.map((s) => (
-                      <li key={s.id} className="flex flex-wrap items-center gap-2">
-                        <input
-                          value={s.name}
-                          onChange={(e) =>
-                            renameSubcategory(s.id, sanitizePlainText(e.target.value))
-                          }
-                          placeholder={
-                            s.id === DEFAULT_SUBCATEGORY_ID
-                              ? 'Leave blank for no sub-label on tasks'
-                              : undefined
-                          }
-                          className="min-h-[40px] min-w-[6rem] flex-1 rounded border border-muted-border px-2 py-2 text-sm"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => onDeleteSub(s.id)}
-                          className="text-xs text-muted-fg underline"
-                        >
-                          Remove
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              );
-            })}
+                    <button
+                      type="button"
+                      onClick={() => onDeleteSub(s.id)}
+                      className="text-xs text-muted-fg underline"
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
         )}
       </section>

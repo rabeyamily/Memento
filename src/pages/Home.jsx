@@ -34,9 +34,16 @@ export function Home() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="font-display text-4xl leading-snug text-ink sm:text-5xl">
-          {formatHomeDate(today)}
-        </h1>
+        <div className="flex items-center gap-2 lg:block lg:gap-0">
+          <h1 className="min-w-0 flex-1 font-display text-4xl leading-none text-ink sm:text-5xl lg:leading-snug">
+            {formatHomeDate(today)}
+          </h1>
+          {/* Reserve the fixed settings control hit area so the date can align to the same row */}
+          <span
+            className="inline-block h-10 w-10 shrink-0 lg:hidden"
+            aria-hidden
+          />
+        </div>
         <p className="mt-3 text-sm text-muted-fg">Today&apos;s habits</p>
       </div>
 

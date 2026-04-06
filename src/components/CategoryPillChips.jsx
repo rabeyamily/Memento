@@ -37,7 +37,6 @@ export function CategoryPillChips({
   subcategories,
   onAddCategory,
   onAddSubcategory,
-  onEnsureSubcategory,
   onDeleteCategory,
   onDeleteSubcategory,
   defaultCategoryId,
@@ -52,12 +51,9 @@ export function CategoryPillChips({
     [categories]
   );
 
-  const subsForCat = useMemo(
-    () =>
-      [...subcategories]
-        .filter((s) => s.categoryId === categoryId)
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [subcategories, categoryId]
+  const sortedSubs = useMemo(
+    () => [...subcategories].sort((a, b) => a.name.localeCompare(b.name)),
+    [subcategories]
   );
 
   const saveCat = () => {
@@ -71,8 +67,8 @@ export function CategoryPillChips({
 
   const saveSub = () => {
     const t = sanitizePlainText(subInput).trim();
-    if (!t || !categoryId) return;
-    const row = onAddSubcategory(categoryId, t);
+    if (!t) return;
+    const row = onAddSubcategory(t);
     if (row) onSubcategoryChange(row.id);
     setSubInput('');
     setNewSubOpen(false);
@@ -96,20 +92,7 @@ export function CategoryPillChips({
             >
               <button
                 type="button"
-                onClick={() => {
-                  onCategoryChange(c.id);
-                  const catSubs = [...subcategories]
-                    .filter((s) => s.categoryId === c.id)
-                    .sort((a, b) => a.name.localeCompare(b.name));
-                  if (catSubs[0]) {
-                    onSubcategoryChange(catSubs[0].id);
-                    return;
-                  }
-                  if (onEnsureSubcategory) {
-                    const row = onEnsureSubcategory(c.id);
-                    if (row) onSubcategoryChange(row.id);
-                  }
-                }}
+                onClick={() => onCategoryChange(c.id)}
                 className="min-h-[32px] shrink px-2.5 py-1.5 text-left"
               >
                 {categoryChipLabel(c, defaultCategoryId)}
@@ -160,7 +143,7 @@ export function CategoryPillChips({
 
       {categoryId && (
         <div className="space-y-2">
-          {shouldHideDefaultSubPicker(categoryId, subsForCat, defaultCategoryId) ? (
+          {shouldHideDefaultSubPicker(subcategories) ? (
             <p className="text-[11px] text-muted-fg">
               Subcategory is optional.{' '}
               <button
@@ -174,12 +157,12 @@ export function CategoryPillChips({
             </p>
           ) : (
             <div className="flex flex-wrap gap-x-1.5 gap-y-2">
-              {subsForCat.length === 0 ? (
+              {sortedSubs.length === 0 ? (
                 <p className="text-[11px] text-muted-fg">Add a subcategory with + New.</p>
               ) : (
-                subsForCat.map((s) => {
+                sortedSubs.map((s) => {
                   const selected = subcategoryId === s.id;
-                  const canDeleteMoreThanOne = subsForCat.length > 1 && onDeleteSubcategory;
+                  const canDeleteMoreThanOne = sortedSubs.length > 1 && onDeleteSubcategory;
                   return (
                     <span
                       key={s.id}
@@ -239,7 +222,7 @@ export function CategoryPillChips({
               )}
             </div>
           )}
-          {shouldHideDefaultSubPicker(categoryId, subsForCat, defaultCategoryId) && newSubOpen && (
+          {shouldHideDefaultSubPicker(subcategories) && newSubOpen && (
             <div className="flex min-w-[9rem] max-w-full shrink-0 items-center gap-1 rounded-full border border-muted-border bg-paper px-2 py-0.5">
               <input
                 autoFocus

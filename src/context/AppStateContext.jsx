@@ -51,49 +51,39 @@ function normalizeSettings(raw) {
 }
 
 const defaultCategories = [{ id: DEFAULT_CATEGORY_ID, name: '' }];
-const defaultSubcategories = [
-  { id: DEFAULT_SUBCATEGORY_ID, name: '', categoryId: DEFAULT_CATEGORY_ID },
-];
+const defaultSubcategories = [{ id: DEFAULT_SUBCATEGORY_ID, name: '' }];
 
-/** Fix tasks whose subcategory does not belong to their category (they would not appear under any heading). */
-function repairTaskCategoryRefs(tasks, categories, subcategories) {
+/** Subcategories are global; tasks pair any category + any sub. Fix invalid ids only. */
+function repairTaskCategorySubRefs(tasks, categories, subcategories) {
   if (!Array.isArray(tasks) || tasks.length === 0) return tasks;
   const catIds = new Set(categories.map((c) => c.id));
-  const subsByCat = new Map();
-  for (const s of subcategories) {
-    if (!subsByCat.has(s.categoryId)) subsByCat.set(s.categoryId, []);
-    subsByCat.get(s.categoryId).push(s);
-  }
-  for (const arr of subsByCat.values()) {
-    arr.sort((a, b) => a.name.localeCompare(b.name));
-  }
-
-  const defaultSubs = subsByCat.get(DEFAULT_CATEGORY_ID) || [];
-  const defaultPair = {
-    categoryId: DEFAULT_CATEGORY_ID,
-    subcategoryId: defaultSubs[0]?.id ?? DEFAULT_SUBCATEGORY_ID,
-  };
+  const subIds = new Set(subcategories.map((s) => s.id));
+  const fallbackSub =
+    subcategories.find((s) => s.id === DEFAULT_SUBCATEGORY_ID)?.id ??
+    subcategories[0]?.id ??
+    DEFAULT_SUBCATEGORY_ID;
 
   let changed = false;
   const next = tasks.map((t) => {
-    if (!catIds.has(t.categoryId)) {
+    let categoryId = t.categoryId;
+    let subcategoryId = t.subcategoryId;
+    if (!catIds.has(categoryId)) {
       changed = true;
-      return { ...t, ...defaultPair };
+      categoryId = DEFAULT_CATEGORY_ID;
     }
-    const sub = subcategories.find((s) => s.id === t.subcategoryId);
-    if (sub && sub.categoryId === t.categoryId) return t;
-
-    const candidates = subsByCat.get(t.categoryId) || [];
-    if (candidates.length > 0) {
+    if (!subIds.has(subcategoryId)) {
       changed = true;
-      return { ...t, subcategoryId: candidates[0].id };
+      subcategoryId = fallbackSub;
     }
-    changed = true;
-    return { ...t, ...defaultPair };
+    return { ...t, categoryId, subcategoryId };
   });
 
   if (changed) saveJSON(STORAGE_KEYS.tasks, next);
   return next;
+}
+
+function normalizeSubcategoriesFlat(subs) {
+  return subs.map((s) => ({ id: s.id, name: s.name ?? '' }));
 }
 
 function migrateIfNeeded() {
@@ -106,12 +96,13 @@ function migrateIfNeeded() {
     const oldSubs = loadJSON('memento_subcategories', []);
     categories = [...defaultCategories];
     if (Array.isArray(oldSubs) && oldSubs.length) {
-      subcategories = oldSubs.map((s) => ({
-        id: s.id,
-        name: s.name,
-        categoryId: s.categoryId || DEFAULT_CATEGORY_ID,
-      }));
-      if (!subcategories.some((s) => s.categoryId === DEFAULT_CATEGORY_ID)) {
+      subcategories = normalizeSubcategoriesFlat(
+        oldSubs.map((s) => ({
+          id: s.id,
+          name: s.name,
+        }))
+      );
+      if (!subcategories.some((s) => s.id === DEFAULT_SUBCATEGORY_ID)) {
         subcategories = [...subcategories, ...defaultSubcategories];
       }
     } else {
@@ -150,17 +141,9 @@ function migrateIfNeeded() {
     saveJSON(STORAGE_KEYS.subcategories, subcategories);
   }
 
-  let clearedMainPlaceholder = false;
-  subcategories = subcategories.map((s) => {
-    if (s.name !== 'Main') return s;
-    const siblings = subcategories.filter((x) => x.categoryId === s.categoryId);
-    if (siblings.length === 1) {
-      clearedMainPlaceholder = true;
-      return { ...s, name: '' };
-    }
-    return s;
-  });
-  if (clearedMainPlaceholder) {
+  const subsWereNested = subcategories.some((s) => Object.prototype.hasOwnProperty.call(s, 'categoryId'));
+  subcategories = normalizeSubcategoriesFlat(subcategories);
+  if (subsWereNested) {
     saveJSON(STORAGE_KEYS.subcategories, subcategories);
   }
 
@@ -190,7 +173,7 @@ function migrateIfNeeded() {
     saveJSON(STORAGE_KEYS.tasks, tasks);
   }
 
-  tasks = repairTaskCategoryRefs(tasks, categories, subcategories);
+  tasks = repairTaskCategorySubRefs(tasks, categories, subcategories);
 
   let settings = loadJSON(STORAGE_KEYS.settings, null);
   settings = normalizeSettings(settings);
@@ -282,46 +265,21 @@ export function AppStateProvider({ children }) {
     (id) => {
       if (id === DEFAULT_CATEGORY_ID) return;
       const fallback = DEFAULT_CATEGORY_ID;
-      const fallbackSub =
-        subcategories.find((s) => s.categoryId === fallback)?.id ||
-        DEFAULT_SUBCATEGORY_ID;
       persistCategories(categories.filter((c) => c.id !== id));
-      persistSubcategories(subcategories.filter((s) => s.categoryId !== id));
       persistTasks(
         tasks.map((t) =>
-          t.categoryId === id
-            ? {
-                ...t,
-                categoryId: fallback,
-                subcategoryId: fallbackSub,
-              }
-            : t
+          t.categoryId === id ? { ...t, categoryId: fallback } : t
         )
       );
     },
-    [categories, subcategories, tasks, persistCategories, persistSubcategories, persistTasks]
+    [categories, tasks, persistCategories, persistTasks]
   );
 
   const addSubcategory = useCallback(
-    (categoryId, name) => {
+    (name) => {
       const trimmed = sanitizePlainText(name).trim();
       if (!trimmed) return null;
-      const row = { id: newId('sc'), name: trimmed, categoryId };
-      persistSubcategories([...subcategories, row]);
-      return row;
-    },
-    [subcategories, persistSubcategories]
-  );
-
-  /** Creates an unnamed subcategory when a category has none (no visible "Main" placeholder). */
-  const ensureSubcategoryForCategory = useCallback(
-    (categoryId) => {
-      if (!categoryId) return null;
-      const existing = [...subcategories]
-        .filter((s) => s.categoryId === categoryId)
-        .sort((a, b) => a.name.localeCompare(b.name));
-      if (existing[0]) return existing[0];
-      const row = { id: newId('sc'), name: '', categoryId };
+      const row = { id: newId('sc'), name: trimmed };
       persistSubcategories([...subcategories, row]);
       return row;
     },
@@ -341,14 +299,11 @@ export function AppStateProvider({ children }) {
 
   const deleteSubcategory = useCallback(
     (id) => {
-      const sc = subcategories.find((s) => s.id === id);
-      if (!sc) return;
-      const sameCat = subcategories.filter(
-        (s) => s.categoryId === sc.categoryId && s.id !== id
-      );
-      const fallback = sameCat[0]?.id;
-      if (!fallback) return;
-      persistSubcategories(subcategories.filter((s) => s.id !== id));
+      const others = subcategories.filter((s) => s.id !== id);
+      if (others.length === 0) return;
+      const fallback =
+        others.find((s) => s.id === DEFAULT_SUBCATEGORY_ID)?.id ?? others[0].id;
+      persistSubcategories(others);
       persistTasks(
         tasks.map((t) =>
           t.subcategoryId === id ? { ...t, subcategoryId: fallback } : t
@@ -466,7 +421,6 @@ export function AppStateProvider({ children }) {
       renameCategory,
       deleteCategory,
       addSubcategory,
-      ensureSubcategoryForCategory,
       renameSubcategory,
       deleteSubcategory,
       addTask,
@@ -486,7 +440,6 @@ export function AppStateProvider({ children }) {
       renameCategory,
       deleteCategory,
       addSubcategory,
-      ensureSubcategoryForCategory,
       renameSubcategory,
       deleteSubcategory,
       addTask,

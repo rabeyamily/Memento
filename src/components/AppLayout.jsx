@@ -15,7 +15,7 @@ export function AppLayout({ children }) {
         <button
           type="button"
           onClick={() => setSettingsOpen(true)}
-          className="fixed right-4 top-4 z-50 inline-flex items-center justify-center p-2 text-ink transition-opacity hover:opacity-70 lg:right-[max(1rem,calc(50%-240px+1rem))]"
+          className="fixed z-50 inline-flex items-center justify-center p-2 text-ink transition-opacity hover:opacity-70 top-[calc(env(safe-area-inset-top,0px)+0.75rem)] right-[max(1rem,env(safe-area-inset-right,0px))] lg:top-4 lg:right-[max(1rem,calc(50%-240px+1rem))]"
           aria-label="Settings"
         >
           <svg
@@ -34,7 +34,7 @@ export function AppLayout({ children }) {
           </svg>
         </button>
         <DesktopNav />
-        <main className="mx-auto max-w-content px-5 pb-28 pt-[4.25rem] sm:pt-16 lg:pb-12 lg:pt-5">
+        <main className="mx-auto max-w-content px-3 pb-28 pt-[calc(env(safe-area-inset-top,0px)+0.75rem)] sm:px-4 lg:px-5 lg:pb-12 lg:pt-5">
           {children}
         </main>
         <BottomNav />

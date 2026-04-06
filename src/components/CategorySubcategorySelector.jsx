@@ -10,16 +10,15 @@ export function CategorySubcategorySelector({
   subcategories,
   onAddCategory,
   onAddSubcategory,
-  onEnsureSubcategory,
 }) {
   const [showCat, setShowCat] = useState(false);
   const [showSub, setShowSub] = useState(false);
   const [catInput, setCatInput] = useState('');
   const [subInput, setSubInput] = useState('');
 
-  const subsForCat = useMemo(
-    () => subcategories.filter((s) => s.categoryId === categoryId),
-    [subcategories, categoryId]
+  const sortedSubs = useMemo(
+    () => [...subcategories].sort((a, b) => a.name.localeCompare(b.name)),
+    [subcategories]
   );
 
   const saveCat = () => {
@@ -33,8 +32,8 @@ export function CategorySubcategorySelector({
 
   const saveSub = () => {
     const t = sanitizePlainText(subInput).trim();
-    if (!t || !categoryId) return;
-    const row = onAddSubcategory(categoryId, t);
+    if (!t) return;
+    const row = onAddSubcategory(t);
     if (row) onSubcategoryChange(row.id);
     setSubInput('');
     setShowSub(false);
@@ -52,19 +51,7 @@ export function CategorySubcategorySelector({
         <select
           id="field-cat"
           value={categoryId}
-          onChange={(e) => {
-            const cat = e.target.value;
-            onCategoryChange(cat);
-            const catSubs = [...subcategories]
-              .filter((s) => s.categoryId === cat)
-              .sort((a, b) => a.name.localeCompare(b.name));
-            if (catSubs[0]) {
-              onSubcategoryChange(catSubs[0].id);
-              return;
-            }
-            const ensured = onEnsureSubcategory?.(cat);
-            if (ensured) onSubcategoryChange(ensured.id);
-          }}
+          onChange={(e) => onCategoryChange(e.target.value)}
           className="w-full rounded-lg border border-muted-border bg-white px-3 py-2.5 text-sm text-ink outline-none focus:border-accent"
         >
           {categories.map((c) => (
@@ -98,7 +85,10 @@ export function CategorySubcategorySelector({
             </button>
             <button
               type="button"
-              onClick={() => { setShowCat(false); setCatInput(''); }}
+              onClick={() => {
+                setShowCat(false);
+                setCatInput('');
+              }}
               className="text-xs text-muted-fg"
             >
               Cancel
@@ -118,10 +108,10 @@ export function CategorySubcategorySelector({
           id="field-sub"
           value={subcategoryId}
           onChange={(e) => onSubcategoryChange(e.target.value)}
-          disabled={subsForCat.length === 0}
+          disabled={sortedSubs.length === 0}
           className="w-full rounded-lg border border-muted-border bg-white px-3 py-2.5 text-sm text-ink outline-none focus:border-accent disabled:opacity-50"
         >
-          {subsForCat.map((s) => (
+          {sortedSubs.map((s) => (
             <option key={s.id} value={s.id}>
               {s.name}
             </option>
@@ -152,7 +142,10 @@ export function CategorySubcategorySelector({
             </button>
             <button
               type="button"
-              onClick={() => { setShowSub(false); setSubInput(''); }}
+              onClick={() => {
+                setShowSub(false);
+                setSubInput('');
+              }}
               className="text-xs text-muted-fg"
             >
               Cancel

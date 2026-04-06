@@ -18,13 +18,12 @@ export function subcategoryChipLabel(subcategory, defaultSubcategoryId) {
 }
 
 /**
- * Only the default unnamed sub exists under the default category — hide sub picker until user adds another.
+ * Only the global default unnamed sub exists — hide sub picker until user adds another subcategory.
  */
-export function shouldHideDefaultSubPicker(categoryId, subsForCategory, defaultCategoryId) {
+export function shouldHideDefaultSubPicker(allSubcategories) {
   return (
-    categoryId === defaultCategoryId &&
-    subsForCategory.length === 1 &&
-    subsForCategory[0].id === DEFAULT_SUBCATEGORY_ID &&
-    !(subsForCategory[0].name || '').trim()
+    allSubcategories.length === 1 &&
+    allSubcategories[0].id === DEFAULT_SUBCATEGORY_ID &&
+    !(allSubcategories[0].name || '').trim()
   );
 }

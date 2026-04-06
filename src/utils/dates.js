@@ -28,11 +28,11 @@ export function formatLongDate(date) {
   });
 }
 
-/** e.g. "Friday — April 3" */
+/** e.g. "Friday—April 3" (narrow separator, no wide spaces around the dash) */
 export function formatHomeDate(date) {
   const weekday = date.toLocaleDateString(undefined, { weekday: 'long' });
   const rest = date.toLocaleDateString(undefined, { month: 'long', day: 'numeric' });
-  return `${weekday} — ${rest}`;
+  return `${weekday}\u2014${rest}`;
 }
 
 export function formatShortDayDate(date) {
